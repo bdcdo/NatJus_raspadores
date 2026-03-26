@@ -21,5 +21,9 @@ output/*/pdfs/
 .DS_Store
 Thumbs.db
 
+# Planejamento interno
+planejamento/
+distribuicao_estados.xlsx
+
 # Arquivos temporários de download
 *.tmp

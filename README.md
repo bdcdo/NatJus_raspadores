@@ -35,8 +35,6 @@ Este projeto automatiza a coleta desses documentos a partir das bases próprias 
 | SC (JFSC) | ~10-20 | Média | requests + BS4 |
 | RR (TJRR) | Pequeno | Média | requests + BS4 |
 
-Detalhes completos de viabilidade técnica em [`planejamento/relatorio_raspagem_natjus.md`](planejamento/relatorio_raspagem_natjus.md).
-
 ---
 
 ## 🚀 Instalação
