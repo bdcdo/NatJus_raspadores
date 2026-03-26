@@ -101,5 +101,5 @@ Consulte o [`AGENTS.md`](AGENTS.md) para as convenções de padronização — n
 
 ## 👥 Equipe
 
-- [Bruno Daleffi](https://github.com/bdcdo)
+- [Bruno Oliveira](https://github.com/bdcdo)
 - [Mariana Püschel](https://github.com/mapuschel)
