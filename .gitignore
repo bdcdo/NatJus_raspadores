@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# PDFs (dados grandes, não versionáveis)
+output/*/pdfs/
+
+# Playwright
+.playwright-mcp/
+
+# Claude
+.claude/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Arquivos temporários de download
+*.tmp
