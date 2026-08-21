@@ -29,8 +29,18 @@ PDF_DIR = OUTPUT_DIR / "pdfs"
 CSV_PATH = OUTPUT_DIR / "metadados.csv"
 CSV_FIELDS = ["id", "titulo", "url_pdf", "caminho_local", "status_download"]
 ID_MIN = 933
-ID_MAX = 4800
+# Teto folgado, e a folga e deliberada: o ultimo id coletado em abril foi o 4691, e a
+# varredura de id inexistente nao dorme (o DELAY so roda apos download bem-sucedido),
+# entao varrer vazio custa quase nada. Parar cedo custaria o periodo novo inteiro.
+ID_MAX = 9000
 DELAY = 0.3
+# Breaker desligado, e o desligamento e o ponto: ele existia para nao varrer o infinito,
+# mas quem limita a varredura e o ID_MAX, que e finito. Com 100 ele abortava dentro do
+# intervalo entre o 4691 e os ids novos, e "parou cedo" ficava indistinguivel de "nao ha
+# nada novo". Com 1000 ele ainda parava no ~5692, sem alcancar o teto. Varrer id vazio
+# custa so a requisicao, porque o DELAY roda apenas apos download bem-sucedido: pagar
+# isso e o que transforma "zero novos, ate onde olhei" em "zero novos ate o ID_MAX".
+MAX_CONSECUTIVE_MISS = None
 
 
 def setup():
@@ -133,8 +143,9 @@ def main():
         if filepath is None:
             total_miss += 1
             consecutive_miss += 1
-            if consecutive_miss >= 100:
-                log.info("  100 IDs consecutivos sem PDF apos ID %d, encerrando.", pdf_id)
+            if MAX_CONSECUTIVE_MISS is not None and consecutive_miss >= MAX_CONSECUTIVE_MISS:
+                log.info("  %d IDs consecutivos sem PDF apos ID %d, encerrando.",
+                         MAX_CONSECUTIVE_MISS, pdf_id)
                 break
             continue
 
