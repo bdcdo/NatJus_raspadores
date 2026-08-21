@@ -7,6 +7,12 @@ __pycache__/
 # PDFs (dados grandes, não versionáveis)
 output/*/pdfs/
 
+# Texto extraído e recortes derivados (regeneráveis por extrair_textos.py
+# e pelos filtrar_*.py; somam centenas de MB e não são fonte)
+output/*/pareceres_texto.csv
+output/*.csv
+output/extraction_errors.log
+
 # Playwright
 .playwright-mcp/
 
