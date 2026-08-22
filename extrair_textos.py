@@ -38,6 +38,12 @@ PROJECT_ROOT = Path(__file__).parent
 OUTPUT_DIR = PROJECT_ROOT / "output"
 FINAL_CSV = OUTPUT_DIR / "pareceres.csv"
 ERROR_LOG = OUTPUT_DIR / "extraction_errors.log"
+# Registro estruturado das falhas desta rodada, uma linha por documento. O
+# extraction_errors.log ao lado nao serve para isso: o FileHandler manda o log
+# inteiro para la, e o arquivo em disco e de marco e abril. E daqui que sai a
+# contagem "falha de extracao" do censo. Arquivo novo, entao nao mexe no
+# fieldnames do CSV intermediario de que a retomada depende.
+FAILURE_CSV = OUTPUT_DIR / "extraction_failures.csv"
 WORKERS = 12
 
 log = logging.getLogger("extrair_textos")
@@ -285,16 +291,34 @@ def process_tribunal(
     done = 0
     errors = 0
 
-    with open(intermediate_csv, "a", newline="", encoding="utf-8") as f:
+    fail_header = not FAILURE_CSV.exists() or FAILURE_CSV.stat().st_size == 0
+
+    with open(intermediate_csv, "a", newline="", encoding="utf-8") as f, open(
+        FAILURE_CSV, "a", newline="", encoding="utf-8"
+    ) as ff:
         writer = csv.DictWriter(f, fieldnames=["external_id", "title", "text"])
         if write_header:
             writer.writeheader()
+        fail_writer = csv.DictWriter(
+            ff, fieldnames=["external_id", "acervo", "pdf_path", "erro"]
+        )
+        if fail_header:
+            fail_writer.writeheader()
 
         futures = {pool.submit(process_item, item): item for item in work_items}
         for future in as_completed(futures):
             ext_id, title, text, error = future.result()
             if error:
                 log.warning(f"  ERRO {ext_id}: {error}")
+                fail_writer.writerow(
+                    {
+                        "external_id": ext_id,
+                        "acervo": config.dir_name,
+                        "pdf_path": futures[future][2],
+                        "erro": error,
+                    }
+                )
+                ff.flush()
                 errors += 1
             else:
                 writer.writerow(
@@ -348,6 +372,20 @@ def main():
         help="Limitar a N PDFs por tribunal (para testes)",
     )
     parser.add_argument(
+        "--tribunal",
+        nargs="+",
+        metavar="NOME",
+        choices=[c.name for c in TRIBUNALS],
+        default=None,
+        help=(
+            "Extrair apenas estes acervos, na ordem de TRIBUNALS. Serve para nao "
+            "sobrepor extracao e coleta dentro de um mesmo acervo, que faria a "
+            "extracao ler um metadados.csv sendo escrito por append. Continua "
+            "sendo um pool so: rodar varios processos disputaria os mesmos nucleos "
+            "e sairia mais lento, nao mais rapido."
+        ),
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=WORKERS,
@@ -365,7 +403,15 @@ def main():
         ],
     )
 
-    log.info(f"=== Extração de texto: {len(TRIBUNALS)} tribunais, {args.workers} workers ===")
+    selecionados = TRIBUNALS
+    if args.tribunal:
+        escolhidos = set(args.tribunal)
+        selecionados = [c for c in TRIBUNALS if c.name in escolhidos]
+
+    log.info(
+        f"=== Extração de texto: {len(selecionados)} tribunais "
+        f"({', '.join(c.name for c in selecionados)}), {args.workers} workers ==="
+    )
     if args.limit:
         log.info(f"    MODO TESTE: limite de {args.limit} PDFs por tribunal")
 
@@ -373,7 +419,7 @@ def main():
     total_errors = 0
 
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        for config in TRIBUNALS:
+        for config in selecionados:
             done, errors = process_tribunal(config, pool, limit=args.limit)
             total_done += done
             total_errors += errors
