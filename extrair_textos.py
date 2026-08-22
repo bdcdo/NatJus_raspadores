@@ -21,6 +21,19 @@ import pymupdf4llm
 # Configuração
 # ---------------------------------------------------------------------------
 
+# O texto integral de um parecer passa do limite default de 131.072 caracteres por
+# campo do modulo csv. Sem elevar o teto, load_already_extracted() morre com
+# _csv.Error ao reler o pareceres_texto.csv, ou seja, exatamente na retomada de que
+# uma corrida longa depende. O laco desce o valor porque field_size_limit e limitado
+# ao C long da plataforma, e sys.maxsize estoura onde ele tem 32 bits.
+_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_limit)
+        break
+    except OverflowError:
+        _limit //= 2
+
 PROJECT_ROOT = Path(__file__).parent
 OUTPUT_DIR = PROJECT_ROOT / "output"
 FINAL_CSV = OUTPUT_DIR / "pareceres.csv"
@@ -148,6 +161,10 @@ TRIBUNALS = [
         build_external_id=lambda r: f"NT-{r['uuid']}-MG",
         build_title=lambda r: r["titulo"],
         get_pdf_path=lambda r: OUTPUT_DIR / "mg_tjmg" / "pdfs" / f"{r['uuid']}.pdf",
+        # raspar_mg.py grava "sucesso" (:145) e "ja_existia" (:123, PDF ja em disco).
+        # Sem declarar os dois, o default ("sucesso",) descarta o segundo em silencio:
+        # o PDF fica no disco e nunca e extraido, sem erro nenhum.
+        status_ok=("sucesso", "ja_existia"),
     ),
     TribunalConfig(
         name="DF",
@@ -155,6 +172,10 @@ TRIBUNALS = [
         build_external_id=lambda r: f"NT-{r['id']}-DF",
         build_title=lambda r: r["titulo"],
         get_pdf_path=lambda r: OUTPUT_DIR / "df_tjdft" / "pdfs" / f"{r['id']}.pdf",
+        # raspar_df.py:161 grava "ok" no sucesso e nunca "sucesso". As 3.213 linhas
+        # do CSV atual sao "sucesso", de versao anterior do raspador, entao os dois
+        # rotulos convivem no mesmo arquivo e ambos precisam estar aqui.
+        status_ok=("sucesso", "ok"),
     ),
     TribunalConfig(
         name="SP",

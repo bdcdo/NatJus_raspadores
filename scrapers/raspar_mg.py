@@ -4,8 +4,10 @@ Coleta metadados e PDFs da coleção NatJus no repositório DSpace do TJMG.
 API: https://bd.tjmg.jus.br/server/api
 
 Uso: uv run python scrapers/raspar_mg.py
+     uv run python scrapers/raspar_mg.py --retry-errors
 """
 
+import argparse
 import csv
 import logging
 import time
@@ -21,6 +23,11 @@ PAGE_SIZE = 40
 DELAY = 0.5
 MAX_RETRIES = 3
 TIMEOUT = 30
+
+# Os status que contam como "ja tenho este PDF". Fonte unica do lado do raspador; o
+# par dela, do lado da extracao, e o status_ok do TribunalConfig de MG em
+# extrair_textos.py, e os dois precisam listar os mesmos valores.
+STATUS_OK = ("sucesso", "ja_existia")
 
 OUTPUT_DIR = Path("output/mg_tjmg")
 PDF_DIR = OUTPUT_DIR / "pdfs"
@@ -55,15 +62,27 @@ def setup():
     PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_already_downloaded():
-    """Carrega UUIDs já processados do CSV para resume."""
-    downloaded = set()
+def load_already_downloaded(retry_errors=False):
+    """Carrega UUIDs já processados do CSV para resume.
+
+    E aqui, e nao na condicao de pulo do laco principal, que se decide o que sera
+    retentado: quem pula consulta este conjunto sem olhar status nenhum. Com
+    retry_errors, a linha em erro deixa de entrar, e o item volta a ser candidato.
+
+    O CSV e append-only, entao um uuid pode ter varias linhas, e a ultima e a que
+    vale. Por isso o status vai para um dict e o conjunto se monta no fim: montar
+    linha a linha faria uma retentativa bem-sucedida ser mascarada pela linha de
+    erro anterior.
+    """
+    status_por_uuid = {}
     if CSV_PATH.exists():
         with open(CSV_PATH, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                downloaded.add(row["uuid"])
-    return downloaded
+                status_por_uuid[row["uuid"]] = row.get("status_download", "")
+    if not retry_errors:
+        return set(status_por_uuid)
+    return {u for u, st in status_por_uuid.items() if st in STATUS_OK}
 
 
 def fetch_with_retry(session, url, params=None):
@@ -166,9 +185,20 @@ def append_csv(entry):
 # --- Main ---
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="retenta os itens cuja ultima linha no CSV tem status de erro",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     setup()
-    downloaded = load_already_downloaded()
+    downloaded = load_already_downloaded(retry_errors=args.retry_errors)
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
 
@@ -176,6 +206,8 @@ def main():
     log.info(f"Coleção: {COLLECTION_UUID}")
     if downloaded:
         log.info(f"Retomando: {len(downloaded)} itens já processados")
+    if args.retry_errors:
+        log.info("--retry-errors ligada: itens em erro voltam para a fila")
 
     page = 0
     total_pages = 1

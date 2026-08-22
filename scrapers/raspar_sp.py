@@ -5,6 +5,7 @@ Usage:
 """
 
 import base64
+import argparse
 import csv
 import json
 import logging
@@ -22,6 +23,13 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.tjsp.jus.br/RHF/NatJus/Apresentacao/Pesquisar"
 ANEXO_URL = "https://www.tjsp.jus.br/RHF/NatJus/Administracao/Documento/ObterAnexo/"
+# Dois rotulos de sucesso convivem no mesmo CSV: o raspador grava "ok" (ver
+# download_pdf), e as 17.443 linhas mais antigas trazem "sucesso", de versao
+# anterior. Filtrar so por um rebaixaria milhares de PDFs ja coletados e os
+# baixaria de novo. O par desta constante e o status_ok do TribunalConfig de SP
+# em extrair_textos.py.
+STATUS_OK = ("sucesso", "ok")
+
 OUTPUT_DIR = Path("output/sp_tjsp")
 PDF_DIR = OUTPUT_DIR / "pdfs"
 CSV_PATH = OUTPUT_DIR / "metadados.csv"
@@ -38,15 +46,25 @@ def setup():
     PDF_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_already_downloaded():
-    """Carrega IDs já baixados do CSV para poder retomar."""
-    downloaded = set()
+def load_already_downloaded(retry_errors=False):
+    """Carrega IDs já baixados do CSV para poder retomar.
+
+    E aqui que se decide o que sera retentado. O filtro do laco principal apenas
+    consulta este conjunto, sem olhar status, entao mexer la nao teria efeito.
+
+    O CSV e append-only e a ultima linha de um id e a que vale; o status vai para
+    um dict para que uma retentativa bem-sucedida nao seja mascarada pela linha de
+    erro que a precede.
+    """
+    status_por_id = {}
     if CSV_PATH.exists():
         with open(CSV_PATH, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                downloaded.add(row["id"])
-    return downloaded
+                status_por_id[row["id"]] = row.get("status_download", "")
+    if not retry_errors:
+        return set(status_por_id)
+    return {i for i, st in status_por_id.items() if st in STATUS_OK}
 
 
 def fetch_page(session, start):
@@ -158,9 +176,20 @@ def append_csv(item):
         writer.writerow(item)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="retenta os itens cuja ultima linha no CSV tem status de erro",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     setup()
-    downloaded = load_already_downloaded()
+    downloaded = load_already_downloaded(retry_errors=args.retry_errors)
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (research bot - levantamento NatJus)",
@@ -168,6 +197,8 @@ def main():
     })
 
     log.info("=== Raspador NatJus SP (TJSP) ===")
+    if args.retry_errors:
+        log.info("--retry-errors ligada: itens em erro voltam para a fila")
 
     # Fase 1: coletar todos os metadados
     log.info("Fase 1: Coletando metadados...")
