@@ -188,46 +188,79 @@ def parse_year_page(
 # --- Download ---
 
 
+def url_candidatas(url: str) -> list[str]:
+    """URLs a tentar para um mesmo documento: a registrada e a de grafia corrigida.
+
+    A listagem do TRF2 grafa o ano com um zero à esquerda em parte dos href de
+    2025, `parecer-0232-02025.pdf`, e dois nomes trazem espaços antes da extensão.
+    O `parse_year_page` copia o href sem normalizar, então o 404 que volta é do
+    nosso endereço e não do documento: um quinto dos 911 erros deste acervo é
+    disso, e não de link morto. Ver a issue 0062 do repositório
+    bdcdo/NatJus_raspadores.
+
+    **A original vem primeiro de propósito.** Se o TRF2 um dia servir mesmo um
+    arquivo com ano de cinco dígitos, o comportamento de hoje fica preservado, e
+    a correção só entra como fallback do que já falhou.
+
+    O nome de arquivo não é corrigido junto, e isso é decisão e não descuido: o
+    `metadados.csv` é append-only e a dedupe chaveia por `arquivo_local`, então
+    gravar o nome corrigido daria duas chaves ao mesmo parecer e inflaria o
+    `listado` do acervo. Corrige-se o endereço, preserva-se a chave.
+    """
+    base, _, nome = url.rpartition("/")
+    corrigido = re.sub(r"\s+\.pdf$", ".pdf", nome)
+    corrigido = re.sub(r"-0(\d{4})\.pdf$", r"-\1.pdf", corrigido)
+    if corrigido == nome:
+        return [url]
+    return [url, f"{base}/{corrigido}"]
+
+
 def download_pdf(
-    session: requests.Session, url: str, filepath: Path
-) -> str:
-    """Baixa um PDF com retries. Retorna status: sucesso/erro/ja_existia."""
+    session: requests.Session, urls: list[str], filepath: Path
+) -> tuple[str, str]:
+    """Baixa um PDF com retries. Retorna (status, url_que_serviu).
+
+    Recebe lista de candidatas, não uma URL: ver `url_candidatas`. A URL que
+    serviu volta para ser gravada no CSV, para que a proveniência do arquivo
+    diga o endereço de onde ele veio, e não o que a listagem publicou.
+    """
     if filepath.exists() and filepath.stat().st_size > 0:
         # Verificar magic bytes
         with open(filepath, "rb") as f:
             if f.read(4) == b"%PDF":
-                return "ja_existia"
+                return "ja_existia", urls[0]
 
     tmp_path = filepath.with_suffix(".tmp")
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = session.get(url, timeout=TIMEOUT, stream=True)
-            resp.raise_for_status()
+    for url in urls:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                resp = session.get(url, timeout=TIMEOUT, stream=True)
+                resp.raise_for_status()
 
-            with open(tmp_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                with open(tmp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
 
-            # Validar PDF
-            with open(tmp_path, "rb") as f:
-                magic = f.read(4)
+                # Validar PDF
+                with open(tmp_path, "rb") as f:
+                    magic = f.read(4)
 
-            if magic != b"%PDF":
+                if magic != b"%PDF":
+                    tmp_path.unlink(missing_ok=True)
+                    log.warning(f"  Arquivo inválido (não é PDF): {url}")
+                    return "erro", url
+
+                tmp_path.rename(filepath)
+                return "sucesso", url
+
+            except requests.RequestException as e:
+                log.warning(f"  Tentativa {attempt}/{MAX_RETRIES} falhou: {e}")
                 tmp_path.unlink(missing_ok=True)
-                log.warning(f"  Arquivo inválido (não é PDF): {url}")
-                return "erro"
+                if attempt < MAX_RETRIES:
+                    time.sleep(2**attempt)
 
-            tmp_path.rename(filepath)
-            return "sucesso"
-
-        except requests.RequestException as e:
-            log.warning(f"  Tentativa {attempt}/{MAX_RETRIES} falhou: {e}")
-            tmp_path.unlink(missing_ok=True)
-            if attempt < MAX_RETRIES:
-                time.sleep(2**attempt)
-
-    return "erro"
+    return "erro", urls[0]
 
 
 # --- CSV ---
@@ -295,8 +328,10 @@ def main():
                 continue
 
             filepath = PDF_DIR / filename
-            status = download_pdf(session, entry["url_pdf"], filepath)
+            candidatas = url_candidatas(entry["url_pdf"])
+            status, url_usada = download_pdf(session, candidatas, filepath)
             entry["status_download"] = status
+            entry["url_pdf"] = url_usada
             totals[status] += 1
 
             append_csv(entry)
