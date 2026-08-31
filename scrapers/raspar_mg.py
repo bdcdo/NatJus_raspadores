@@ -85,6 +85,22 @@ def load_already_downloaded(retry_errors=False):
     return {u for u, st in status_por_uuid.items() if st in STATUS_OK}
 
 
+def resposta_definitiva(e: Exception) -> bool:
+    """Diz se a exceção carrega um 4xx que não seja 429, isto é, resposta e não falha.
+
+    O `raise_for_status` transforma 404 em exceção, e o laço de retentativa a
+    trata como se fosse timeout: são MAX_RETRIES tentativas com backoff
+    exponencial sobre um código que não vai mudar entre elas. Medido no acervo
+    do RJ em 23/08/2026: os 714 endereços de ausência confirmada custaram cerca
+    de 2.100 requisições e cerca de 14 minutos apenas de `sleep`.
+
+    O 429 fica de fora porque ele é justamente o código que pede espera, e os
+    5xx continuam merecendo backoff.
+    """
+    resp = getattr(e, "response", None)
+    return resp is not None and 400 <= resp.status_code < 500 and resp.status_code != 429
+
+
 def fetch_with_retry(session, url, params=None):
     """GET com retry e backoff exponencial."""
     for attempt in range(1, MAX_RETRIES + 1):
@@ -94,6 +110,8 @@ def fetch_with_retry(session, url, params=None):
             return resp
         except requests.RequestException as e:
             log.warning(f"  Tentativa {attempt}/{MAX_RETRIES} falhou para {url}: {e}")
+            if resposta_definitiva(e):
+                break
             if attempt < MAX_RETRIES:
                 time.sleep(2**attempt)
     raise requests.RequestException(f"Falhou após {MAX_RETRIES} tentativas: {url}")
@@ -166,6 +184,8 @@ def download_pdf(session, url, filepath):
         except requests.RequestException as e:
             log.warning(f"  Tentativa {attempt}/{MAX_RETRIES} falhou: {e}")
             tmp_path.unlink(missing_ok=True)
+            if resposta_definitiva(e):
+                break
             if attempt < MAX_RETRIES:
                 time.sleep(2**attempt)
 

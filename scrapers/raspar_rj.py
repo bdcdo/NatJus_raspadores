@@ -185,6 +185,22 @@ def parse_year_page(
     return entries
 
 
+def resposta_definitiva(e: Exception) -> bool:
+    """Diz se a exceção carrega um 4xx que não seja 429, isto é, resposta e não falha.
+
+    O `raise_for_status` transforma 404 em exceção, e o laço de retentativa a
+    trata como se fosse timeout: são MAX_RETRIES tentativas com backoff
+    exponencial sobre um código que não vai mudar entre elas. Medido no acervo
+    do RJ em 23/08/2026: os 714 endereços de ausência confirmada custaram cerca
+    de 2.100 requisições e cerca de 14 minutos apenas de `sleep`.
+
+    O 429 fica de fora porque ele é justamente o código que pede espera, e os
+    5xx continuam merecendo backoff.
+    """
+    resp = getattr(e, "response", None)
+    return resp is not None and 400 <= resp.status_code < 500 and resp.status_code != 429
+
+
 # --- Download ---
 
 
@@ -195,8 +211,7 @@ def url_candidatas(url: str) -> list[str]:
     2025, `parecer-0232-02025.pdf`, e dois nomes trazem espaços antes da extensão.
     O `parse_year_page` copia o href sem normalizar, então o 404 que volta é do
     nosso endereço e não do documento: um quinto dos 911 erros deste acervo é
-    disso, e não de link morto. Ver a issue 0062 do repositório
-    bdcdo/NatJus_raspadores.
+    disso, e não de link morto.
 
     **A original vem primeiro de propósito.** Se o TRF2 um dia servir mesmo um
     arquivo com ano de cinco dígitos, o comportamento de hoje fica preservado, e
@@ -257,6 +272,8 @@ def download_pdf(
             except requests.RequestException as e:
                 log.warning(f"  Tentativa {attempt}/{MAX_RETRIES} falhou: {e}")
                 tmp_path.unlink(missing_ok=True)
+                if resposta_definitiva(e):
+                    break  # passa à candidata seguinte, se houver
                 if attempt < MAX_RETRIES:
                     time.sleep(2**attempt)
 

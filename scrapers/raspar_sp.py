@@ -90,7 +90,7 @@ def fetch_page(session, start):
             total = int(data.get("Total", 0))
             return items, total
         except (requests.RequestException, json.JSONDecodeError, ValueError) as e:
-            if attempt < 2:
+            if attempt < 2 and not resposta_definitiva(e):
                 log.warning("Erro na página start=%d, tentativa %d: %s", start, attempt + 1, e)
                 time.sleep(2 ** attempt)
             else:
@@ -156,7 +156,7 @@ def download_pdf(session, doc_id):
             return str(filepath), nome_arquivo
 
         except (requests.RequestException, json.JSONDecodeError, Exception) as e:
-            if attempt < 2:
+            if attempt < 2 and not resposta_definitiva(e):
                 log.warning("Erro no PDF %s, tentativa %d: %s", doc_id, attempt + 1, e)
                 time.sleep(2 ** attempt)
             else:
@@ -164,6 +164,22 @@ def download_pdf(session, doc_id):
                 return None, None
 
     return None, None
+
+
+def resposta_definitiva(e: Exception) -> bool:
+    """Diz se a exceção carrega um 4xx que não seja 429, isto é, resposta e não falha.
+
+    O `raise_for_status` transforma 404 em exceção, e o laço de retentativa a
+    trata como se fosse timeout: são MAX_RETRIES tentativas com backoff
+    exponencial sobre um código que não vai mudar entre elas. Medido no acervo
+    do RJ em 23/08/2026: os 714 endereços de ausência confirmada custaram cerca
+    de 2.100 requisições e cerca de 14 minutos apenas de `sleep`.
+
+    O 429 fica de fora porque ele é justamente o código que pede espera, e os
+    5xx continuam merecendo backoff.
+    """
+    resp = getattr(e, "response", None)
+    return resp is not None and 400 <= resp.status_code < 500 and resp.status_code != 429
 
 
 def append_csv(item):
