@@ -194,6 +194,10 @@ TRIBUNALS = [
     TribunalConfig(
         name="RJ",
         dir_name="rj_trf2",
+        # O id do RJ não é chave única: o TRF2 reaproveita o número de parecer
+        # dentro do mesmo ano e desambigua pelo sufixo do nome do arquivo, que
+        # esta expressão descarta. São 8 pares colididos, medidos por censo em
+        # 23/08/2026, e os dois membros de cada par são documentos distintos.
         build_external_id=lambda r: (
             f"NATJUS-FEDERAL-{r['numero_parecer']}-{r['ano']}"
             if r["numero_parecer"]
@@ -237,7 +241,14 @@ def process_item(args: tuple[str, str, str]) -> tuple[str, str, str, str | None]
 
 
 def load_already_extracted(csv_path: Path) -> set[str]:
-    """Carrega external_ids já extraídos de um CSV intermediário."""
+    """Carrega external_ids já extraídos de um CSV intermediário.
+
+    A retomada é por id presente na saída, não por arquivo existente. No RJ,
+    onde o id colide, isso faz o segundo documento de um par ser
+    pulado para sempre, sem linha de texto e sem linha de falha: ele some das
+    duas contagens e a identidade de fechamento continua fechando. Por isso a
+    conferência de colisão precede a extração de qualquer delta.
+    """
     if not csv_path.exists():
         return set()
     ids = set()

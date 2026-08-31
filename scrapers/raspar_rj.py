@@ -191,8 +191,9 @@ def resposta_definitiva(e: Exception) -> bool:
     O `raise_for_status` transforma 404 em exceção, e o laço de retentativa a
     trata como se fosse timeout: são MAX_RETRIES tentativas com backoff
     exponencial sobre um código que não vai mudar entre elas. Medido no acervo
-    do RJ em 23/08/2026: os 714 endereços de ausência confirmada custaram cerca
-    de 2.100 requisições e cerca de 14 minutos apenas de `sleep`.
+    do RJ em 23/08/2026: os 714 endereços de ausência confirmada custaram 2.142
+    requisições e cerca de 71 minutos apenas de `sleep`. A conta é 2 + 4 = 6 s
+    de espera por endereço, com o raspador serial: 714 x 6 s = 4.284 s.
 
     O 429 fica de fora porque ele é justamente o código que pede espera, e os
     5xx continuam merecendo backoff.
@@ -264,7 +265,13 @@ def download_pdf(
                 if magic != b"%PDF":
                     tmp_path.unlink(missing_ok=True)
                     log.warning(f"  Arquivo inválido (não é PDF): {url}")
-                    return "erro", url
+                    # Passa à candidata seguinte em vez de desistir aqui. O TRF2
+                    # serve `200 application/pdf` com objeto corrompido, medido em
+                    # 23/08/2026 em seis endereços de nome canônico, então corpo
+                    # inválido não prova que as outras grafias do nome também
+                    # estejam. Desistir na primeira candidata anularia a correção de
+                    # grafia justamente no caso que ela existe para cobrir.
+                    break
 
                 tmp_path.rename(filepath)
                 return "sucesso", url
