@@ -103,3 +103,9 @@ Consulte o [`AGENTS.md`](AGENTS.md) para as convenções de padronização — n
 
 - [Bruno Oliveira](https://github.com/bdcdo)
 - [Mariana Püschel](https://github.com/mapuschel)
+
+---
+
+## Licença
+
+O código é distribuído sob a [licença MIT](LICENSE). Os raspadores de MG, DFT e TRF-4 (Curitiba e Londrina) partiram dos repositórios da Mariana Püschel, também sob MIT.
